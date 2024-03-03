@@ -1,0 +1,75 @@
+---
+- name: Provision a GCE instance
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    service_account_key: "accountkey.json"
+    project_id: "your-project-id"
+    auth_method: "serviceaccount"
+    instance_name: "ansibled-instance"
+    machine_type: "n1-standard-1"
+    disk_image: "projects/debian-cloud/global/images/family/debian-12"
+    zone: "europe-west1-b"
+    scopes:
+      - https://www.googleapis.com/auth/compute  # View and manage your Google Compute Engine resources
+
+  tasks:
+    - name: Set Google Cloud credentials
+      ansible.builtin.set_fact:
+        gce_credentials_file: "{{ service_account_key }}"
+      environment:
+        CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: "{{ service_account_key }}"
+        GOOGLE_APPLICATION_CREDENTIALS: "{{ service_account_key }}"
+
+    - name: Create a required address for the GCE instance
+      google.cloud.gcp_compute_address:
+        name: ansible-instance-address
+        project: "{{ project_id }}"
+        auth_kind: "{{ auth_method }}"
+        service_account_file: "{{ service_account_key }}"
+        region: europe-west1
+        state: present
+      register: address
+
+    - name: Create a required disk for the GCE instance
+      google.cloud.gcp_compute_disk:
+        project: "{{ project_id }}"
+        auth_kind: "{{ auth_method }}"
+        service_account_file: "{{ service_account_key }}"
+        name: ansible-instance-disk
+        size_gb: 15
+        source_image: "{{ disk_image }}"
+        zone: europe-west1-b
+        state: present
+      register: disk
+
+    - name: Create GCE instance
+      google.cloud.gcp_compute_instance:
+        project: "{{ project_id }}"
+        auth_kind: "{{ auth_method }}"
+        service_account_file: "{{ service_account_key }}"
+        name: "{{ instance_name }}"
+        machine_type: "{{ machine_type }}"
+        disks:  # Required (not set automatically by GCP module)
+        - auto_delete: 'true'
+          boot: 'true'
+          source: "{{ disk }}"
+        - auto_delete: 'true'  # Automatically delete the disk when the instance is deleted
+          interface: NVME
+          type: SCRATCH  # SSD cannot be PERSISTENT
+          initialize_params:
+            disk_type: local-ssd
+        network_interfaces:  # Required (not set automatically by GCP module)
+        - network:  # Network not set -> Using default network (has SSH already set up)
+          access_configs:
+          - name: External NAT
+            nat_ip: "{{ address }}"
+            type: ONE_TO_ONE_NAT  # Default and only option
+        zone: "{{ zone }}"
+      register: instance_result
+
+    - name: Check if instance was created successfully
+      ansible.builtin.debug:
+        var: instance_result
+...
