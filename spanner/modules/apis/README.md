@@ -1,0 +1,1 @@
+Module to enable GCP Cloud Resource Manager API and Spanner API.
